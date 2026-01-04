@@ -16,6 +16,7 @@ mod input;
 mod terminal;
 mod theme;
 mod ui;
+mod utils;
 
 fn main() -> Result<()> {
     // Initialize logging

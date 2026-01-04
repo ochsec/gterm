@@ -5,6 +5,7 @@ use crate::terminal::Terminal;
 use crate::theme::Theme;
 use crate::ui::dialog::{Dialog, FileOpenDialog, FileSaveAsDialog};
 use crate::ui::{self, Pane};
+use crate::utils::clipboard::Clipboard;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::prelude::*;
@@ -55,6 +56,8 @@ pub struct App {
     pub terminal: Option<Terminal>,
     /// Last known terminal area for resize detection
     pub terminal_area: Option<Rect>,
+    /// System clipboard
+    pub clipboard: Clipboard,
 }
 
 /// Which divider is being resized
@@ -80,7 +83,7 @@ impl App {
             show_sidebar: true,
             show_terminal: true,
             sidebar_width_percent: 20,
-            terminal_height_percent: 30,
+            terminal_height_percent: 50,
             resizing: None,
             theme: Theme::dark(),
             input_handler: InputHandler::new(),
@@ -96,6 +99,7 @@ impl App {
             dialog: None,
             terminal: Terminal::new(80, 24).ok(),
             terminal_area: None,
+            clipboard: Clipboard::new(),
         }
     }
 
@@ -276,13 +280,31 @@ impl App {
                             // TODO: Implement redo
                         }
                         MenuAction::Cut => {
-                            // TODO: Implement cut
+                            // Get selected text first
+                            let text = self.active_document().map(|doc| doc.selected_text());
+                            if let Some(text) = text {
+                                if !text.is_empty() {
+                                    let _ = self.clipboard.set_text(&text);
+                                    if let Some(doc) = self.active_document_mut() {
+                                        doc.delete_selection();
+                                    }
+                                }
+                            }
                         }
                         MenuAction::Copy => {
-                            // TODO: Implement copy
+                            if let Some(doc) = self.active_document() {
+                                let text = doc.selected_text();
+                                if !text.is_empty() {
+                                    let _ = self.clipboard.set_text(&text);
+                                }
+                            }
                         }
                         MenuAction::Paste => {
-                            // TODO: Implement paste
+                            if let Ok(text) = self.clipboard.get_text() {
+                                if let Some(doc) = self.active_document_mut() {
+                                    doc.insert_str(&text);
+                                }
+                            }
                         }
                         MenuAction::SelectAll => {
                             if let Some(doc) = self.active_document_mut() {
