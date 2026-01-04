@@ -777,6 +777,38 @@ impl App {
                 }
                 return Ok(());
             }
+            // Cut: Ctrl+X
+            (true, false, KeyCode::Char('x')) => {
+                let text = self.active_document().map(|doc| doc.selected_text());
+                if let Some(text) = text {
+                    if !text.is_empty() {
+                        let _ = self.clipboard.set_text(&text);
+                        if let Some(doc) = self.active_document_mut() {
+                            doc.delete_selection();
+                        }
+                    }
+                }
+                return Ok(());
+            }
+            // Copy: Ctrl+C
+            (true, false, KeyCode::Char('c')) => {
+                if let Some(doc) = self.active_document() {
+                    let text = doc.selected_text();
+                    if !text.is_empty() {
+                        let _ = self.clipboard.set_text(&text);
+                    }
+                }
+                return Ok(());
+            }
+            // Paste: Ctrl+V
+            (true, false, KeyCode::Char('v')) => {
+                if let Ok(text) = self.clipboard.get_text() {
+                    if let Some(doc) = self.active_document_mut() {
+                        doc.insert_str(&text);
+                    }
+                }
+                return Ok(());
+            }
             _ => {}
         }
 
