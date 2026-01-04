@@ -1,0 +1,46 @@
+# gterm dark theme (inspired by Geany's dark mode)
+
+[colors]
+# Main colors
+bg = "#1e1e1e"
+fg = "#d4d4d4"
+
+# Panel backgrounds
+sidebar_bg = "#252526"
+editor_bg = "#1e1e1e"
+terminal_bg = "#181818"
+
+# Status bar
+statusbar_bg = "#007acc"
+statusbar_fg = "#ffffff"
+
+# Menu bar
+menubar_bg = "#3c3c3c"
+menubar_fg = "#d4d4d4"
+
+# Tabs
+tabbar_bg = "#2d2d2d"
+tab_active_bg = "#1e1e1e"
+tab_active_fg = "#ffffff"
+tab_inactive_bg = "#2d2d2d"
+tab_inactive_fg = "#969696"
+
+# Borders
+border = "#3c3c3c"
+border_focused = "#007acc"
+
+# Line numbers
+line_number = "#858585"
+line_number_current = "#c8c8c8"
+line_highlight = "#282828"
+
+# Selection
+selection_bg = "#264f78"
+
+# Cursor
+cursor = "#ffffff"
+
+# File tree
+tree_dir = "#dcdcaa"
+tree_file = "#d4d4d4"
+tree_selected_bg = "#3e3e3e"

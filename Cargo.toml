@@ -1,0 +1,54 @@
+[package]
+name = "gterm"
+version = "0.1.0"
+edition = "2021"
+description = "A TUI code editor inspired by Geany"
+license = "GPL-2.0"
+authors = ["gterm contributors"]
+readme = "README.md"
+repository = "https://github.com/gterm/gterm"
+keywords = ["tui", "editor", "terminal", "ide"]
+categories = ["command-line-utilities", "text-editors"]
+
+[dependencies]
+# TUI
+ratatui = "0.28"
+crossterm = "0.28"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Text editing
+ropey = "1.6"
+syntect = "5"
+unicode-width = "0.1"
+unicode-segmentation = "1.10"
+
+# Terminal emulation
+portable-pty = "0.8"
+vt100 = "0.15"
+
+# File operations
+ignore = "0.4"
+notify = "6"
+
+# Clipboard
+arboard = "3"
+
+# Config
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dirs = "5"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"

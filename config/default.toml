@@ -1,0 +1,28 @@
+# gterm default configuration
+
+[editor]
+tab_width = 4
+insert_spaces = true
+auto_indent = true
+show_line_numbers = true
+highlight_current_line = true
+word_wrap = false
+
+[terminal]
+# Empty = use $SHELL environment variable
+shell = ""
+
+[ui]
+show_sidebar = true
+show_terminal = true
+sidebar_width = 20
+terminal_height = 30
+theme = "dark"
+
+[file_tree]
+show_hidden = false
+follow_current_file = true
+
+# Override default keybindings here
+# [keybindings]
+# find = "Ctrl+F"
