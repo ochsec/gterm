@@ -2,6 +2,7 @@ use crate::editor::Document;
 use crate::file_tree::FileTree;
 use crate::input::InputHandler;
 use crate::theme::Theme;
+use crate::ui::dialog::{Dialog, FileOpenDialog, FileSaveAsDialog};
 use crate::ui::{self, Pane};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
@@ -41,6 +42,14 @@ pub struct App {
     pub active_doc: usize,
     /// Last known editor area for mouse hit detection
     pub editor_area: Option<Rect>,
+    /// Currently open menu (None = menu bar closed)
+    pub menu_open: Option<usize>,
+    /// Currently selected menu item within open menu
+    pub menu_selected: Option<usize>,
+    /// Menu positions for click detection (start_x, end_x, menu_index)
+    pub menu_positions: Vec<(u16, u16, usize)>,
+    /// Active dialog (if any)
+    pub dialog: Option<Dialog>,
 }
 
 /// Which divider is being resized
@@ -76,6 +85,248 @@ impl App {
             documents,
             active_doc: 0,
             editor_area: None,
+            menu_open: None,
+            menu_selected: None,
+            menu_positions: Vec::new(),
+            dialog: None,
+        }
+    }
+
+    /// Open the file open dialog
+    pub fn show_open_dialog(&mut self) {
+        let start_dir = self.cwd.clone();
+        self.dialog = Some(Dialog::FileOpen(FileOpenDialog::new(start_dir)));
+    }
+
+    /// Open the file save as dialog
+    pub fn show_save_as_dialog(&mut self) {
+        let start_dir = if let Some(doc) = self.active_document() {
+            // If document has a path, start in its directory
+            doc.path
+                .as_ref()
+                .and_then(|p| p.parent())
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| self.cwd.clone())
+        } else {
+            self.cwd.clone()
+        };
+
+        // Get initial filename from document
+        let initial_filename = if let Some(doc) = self.active_document() {
+            doc.path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| doc.title().to_string())
+        } else {
+            "untitled.txt".to_string()
+        };
+
+        self.dialog = Some(Dialog::FileSaveAs(FileSaveAsDialog::new(
+            start_dir,
+            initial_filename,
+        )));
+    }
+
+    /// Close any open dialog
+    pub fn close_dialog(&mut self) {
+        self.dialog = None;
+    }
+
+    /// Check if a dialog is open
+    pub fn has_dialog(&self) -> bool {
+        self.dialog.is_some()
+    }
+
+    /// Close the menu
+    pub fn close_menu(&mut self) {
+        self.menu_open = None;
+        self.menu_selected = None;
+    }
+
+    /// Open a specific menu
+    pub fn open_menu(&mut self, menu_idx: usize) {
+        self.menu_open = Some(menu_idx);
+        self.menu_selected = Some(0);
+    }
+
+    /// Move to the next menu
+    pub fn next_menu(&mut self) {
+        if let Some(idx) = self.menu_open {
+            let next = (idx + 1) % crate::ui::menu_bar::MENUS.len();
+            self.menu_open = Some(next);
+            self.menu_selected = Some(0);
+        }
+    }
+
+    /// Move to the previous menu
+    pub fn prev_menu(&mut self) {
+        if let Some(idx) = self.menu_open {
+            let prev = if idx == 0 {
+                crate::ui::menu_bar::MENUS.len() - 1
+            } else {
+                idx - 1
+            };
+            self.menu_open = Some(prev);
+            self.menu_selected = Some(0);
+        }
+    }
+
+    /// Move selection down in the menu
+    pub fn menu_select_next(&mut self) {
+        if let (Some(menu_idx), Some(sel)) = (self.menu_open, self.menu_selected) {
+            if let Some((_, items)) = crate::ui::menu_bar::MENUS.get(menu_idx) {
+                let mut next = sel + 1;
+                // Skip separators and wrap
+                while next < items.len() {
+                    if items[next].action != crate::ui::menu_bar::MenuAction::Separator {
+                        break;
+                    }
+                    next += 1;
+                }
+                if next >= items.len() {
+                    next = 0;
+                    // Skip initial separators
+                    while next < items.len()
+                        && items[next].action == crate::ui::menu_bar::MenuAction::Separator
+                    {
+                        next += 1;
+                    }
+                }
+                self.menu_selected = Some(next);
+            }
+        }
+    }
+
+    /// Move selection up in the menu
+    pub fn menu_select_prev(&mut self) {
+        if let (Some(menu_idx), Some(sel)) = (self.menu_open, self.menu_selected) {
+            if let Some((_, items)) = crate::ui::menu_bar::MENUS.get(menu_idx) {
+                let mut prev = if sel == 0 { items.len() - 1 } else { sel - 1 };
+                // Skip separators
+                while prev > 0 && items[prev].action == crate::ui::menu_bar::MenuAction::Separator {
+                    prev -= 1;
+                }
+                // If we hit a separator at 0, go to end
+                if items[prev].action == crate::ui::menu_bar::MenuAction::Separator {
+                    prev = items.len() - 1;
+                    while prev > 0
+                        && items[prev].action == crate::ui::menu_bar::MenuAction::Separator
+                    {
+                        prev -= 1;
+                    }
+                }
+                self.menu_selected = Some(prev);
+            }
+        }
+    }
+
+    /// Execute the currently selected menu action
+    pub fn execute_menu_action(&mut self) {
+        use crate::ui::menu_bar::MenuAction;
+
+        if let (Some(menu_idx), Some(sel)) = (self.menu_open, self.menu_selected) {
+            if let Some((_, items)) = crate::ui::menu_bar::MENUS.get(menu_idx) {
+                if let Some(item) = items.get(sel) {
+                    let action = item.action;
+                    self.close_menu();
+
+                    match action {
+                        MenuAction::NewFile => self.new_file(),
+                        MenuAction::OpenFile => {
+                            self.show_open_dialog();
+                        }
+                        MenuAction::Save => {
+                            if let Some(doc) = self.active_document_mut() {
+                                if doc.path.is_some() {
+                                    let _ = doc.save();
+                                }
+                            }
+                        }
+                        MenuAction::SaveAs => {
+                            self.show_save_as_dialog();
+                        }
+                        MenuAction::SaveAll => {
+                            for doc in &mut self.documents {
+                                if doc.path.is_some() && doc.modified {
+                                    let _ = doc.save();
+                                }
+                            }
+                        }
+                        MenuAction::Close => self.close_current(),
+                        MenuAction::CloseAll => {
+                            self.documents.clear();
+                            self.documents.push(Document::new());
+                            self.active_doc = 0;
+                        }
+                        MenuAction::Quit => self.should_quit = true,
+
+                        MenuAction::Undo => {
+                            // TODO: Implement undo
+                        }
+                        MenuAction::Redo => {
+                            // TODO: Implement redo
+                        }
+                        MenuAction::Cut => {
+                            // TODO: Implement cut
+                        }
+                        MenuAction::Copy => {
+                            // TODO: Implement copy
+                        }
+                        MenuAction::Paste => {
+                            // TODO: Implement paste
+                        }
+                        MenuAction::SelectAll => {
+                            if let Some(doc) = self.active_document_mut() {
+                                doc.select_all();
+                            }
+                        }
+
+                        MenuAction::Find => {
+                            // TODO: Open find dialog
+                        }
+                        MenuAction::FindNext => {
+                            // TODO: Find next
+                        }
+                        MenuAction::FindPrevious => {
+                            // TODO: Find previous
+                        }
+                        MenuAction::Replace => {
+                            // TODO: Open replace dialog
+                        }
+                        MenuAction::GoToLine => {
+                            // TODO: Open go to line dialog
+                        }
+
+                        MenuAction::ToggleSidebar => {
+                            self.show_sidebar = !self.show_sidebar;
+                        }
+                        MenuAction::ToggleTerminal => {
+                            self.show_terminal = !self.show_terminal;
+                        }
+                        MenuAction::FocusEditor => {
+                            self.focused_pane = Pane::Editor;
+                        }
+                        MenuAction::FocusFileTree => {
+                            if self.show_sidebar {
+                                self.focused_pane = Pane::FileTree;
+                            }
+                        }
+                        MenuAction::FocusTerminal => {
+                            if self.show_terminal {
+                                self.focused_pane = Pane::Terminal;
+                            }
+                        }
+
+                        MenuAction::About => {
+                            // TODO: Show about dialog
+                        }
+
+                        MenuAction::Separator => {}
+                    }
+                }
+            }
         }
     }
 
@@ -190,6 +441,53 @@ impl App {
 
     /// Handle keyboard events
     fn handle_key_event(&mut self, key: event::KeyEvent) -> Result<()> {
+        // If dialog is open, handle dialog input first
+        if self.dialog.is_some() {
+            return self.handle_dialog_key(key);
+        }
+
+        // If menu is open, handle menu navigation first
+        if self.menu_open.is_some() {
+            match key.code {
+                KeyCode::Esc => {
+                    self.close_menu();
+                    return Ok(());
+                }
+                KeyCode::Left => {
+                    self.prev_menu();
+                    return Ok(());
+                }
+                KeyCode::Right => {
+                    self.next_menu();
+                    return Ok(());
+                }
+                KeyCode::Up => {
+                    self.menu_select_prev();
+                    return Ok(());
+                }
+                KeyCode::Down => {
+                    self.menu_select_next();
+                    return Ok(());
+                }
+                KeyCode::Enter => {
+                    self.execute_menu_action();
+                    return Ok(());
+                }
+                _ => {
+                    // Close menu on any other key
+                    self.close_menu();
+                }
+            }
+        }
+
+        // F10 or Alt to open menu
+        if key.code == KeyCode::F(10)
+            || (key.modifiers == KeyModifiers::ALT && key.code == KeyCode::Char('f'))
+        {
+            self.open_menu(0); // Open File menu
+            return Ok(());
+        }
+
         // Global shortcuts (work regardless of focus)
         match (key.modifiers, key.code) {
             // Quit: Ctrl+Q
@@ -220,8 +518,8 @@ impl App {
                     self.focused_pane = Pane::Terminal;
                 }
             }
-            // Tab to cycle focus
-            (KeyModifiers::NONE, KeyCode::Tab) => {
+            // Tab to cycle focus (only when menu closed and not in editor)
+            (KeyModifiers::NONE, KeyCode::Tab) if self.focused_pane != Pane::Editor => {
                 self.cycle_focus(true);
             }
             (KeyModifiers::SHIFT, KeyCode::BackTab) => {
@@ -230,6 +528,122 @@ impl App {
             _ => {
                 // Pass to focused pane handler
                 self.handle_pane_key_event(key)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle keyboard events for dialogs
+    fn handle_dialog_key(&mut self, key: event::KeyEvent) -> Result<()> {
+        let dialog = match &mut self.dialog {
+            Some(d) => d,
+            None => return Ok(()),
+        };
+
+        match dialog {
+            Dialog::FileOpen(ref mut file_dialog) => {
+                match key.code {
+                    KeyCode::Esc => {
+                        self.dialog = None;
+                    }
+                    KeyCode::Tab => {
+                        file_dialog.toggle_focus();
+                    }
+                    KeyCode::Up if !file_dialog.input_focused => {
+                        file_dialog.move_up();
+                    }
+                    KeyCode::Down if !file_dialog.input_focused => {
+                        file_dialog.move_down();
+                    }
+                    KeyCode::PageUp if !file_dialog.input_focused => {
+                        file_dialog.page_up(10);
+                    }
+                    KeyCode::PageDown if !file_dialog.input_focused => {
+                        file_dialog.page_down(10);
+                    }
+                    KeyCode::Backspace => {
+                        if file_dialog.input_focused {
+                            file_dialog.handle_backspace();
+                        } else {
+                            file_dialog.go_up();
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if file_dialog.input_focused {
+                            // Try to navigate to input path
+                            if let Some(path) = file_dialog.navigate_to_input() {
+                                let _ = self.open_file(path);
+                                self.dialog = None;
+                            }
+                        } else {
+                            // Select current item
+                            if let Some(path) = file_dialog.enter_selected() {
+                                let _ = self.open_file(path);
+                                self.dialog = None;
+                            }
+                        }
+                    }
+                    KeyCode::Char(c) if file_dialog.input_focused => {
+                        file_dialog.handle_input(c);
+                    }
+                    _ => {}
+                }
+            }
+            Dialog::FileSaveAs(ref mut save_dialog) => {
+                match key.code {
+                    KeyCode::Esc => {
+                        self.dialog = None;
+                    }
+                    KeyCode::Tab => {
+                        save_dialog.toggle_focus();
+                    }
+                    KeyCode::Up if save_dialog.focus == 1 => {
+                        save_dialog.move_up();
+                    }
+                    KeyCode::Down if save_dialog.focus == 1 => {
+                        save_dialog.move_down();
+                    }
+                    KeyCode::PageUp if save_dialog.focus == 1 => {
+                        save_dialog.page_up(10);
+                    }
+                    KeyCode::PageDown if save_dialog.focus == 1 => {
+                        save_dialog.page_down(10);
+                    }
+                    KeyCode::Backspace => {
+                        if save_dialog.focus == 0 {
+                            save_dialog.handle_backspace();
+                        } else {
+                            save_dialog.go_up();
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if save_dialog.focus == 0 {
+                            // Save with current filename
+                            if save_dialog.is_valid() {
+                                let save_path = save_dialog.get_save_path();
+                                if let Some(doc) = self.active_document_mut() {
+                                    doc.path = Some(save_path);
+                                    let _ = doc.save();
+                                }
+                                // Refresh file tree to show the new file
+                                self.file_tree.refresh();
+                                self.dialog = None;
+                            }
+                        } else {
+                            // Enter in file list: navigate into dir or select file
+                            save_dialog.enter_selected();
+                        }
+                    }
+                    KeyCode::Char(c) if save_dialog.focus == 0 => {
+                        save_dialog.handle_input(c);
+                    }
+                    _ => {}
+                }
+            }
+            Dialog::Message(_) => {
+                // Any key closes message dialog
+                self.dialog = None;
             }
         }
 
@@ -265,14 +679,28 @@ impl App {
                 self.new_file();
                 return Ok(());
             }
+            // Open file: Ctrl+O
+            (true, false, KeyCode::Char('o')) => {
+                self.show_open_dialog();
+                return Ok(());
+            }
             // Save: Ctrl+S
             (true, false, KeyCode::Char('s')) => {
-                if let Some(doc) = self.active_document_mut() {
+                if let Some(doc) = self.active_document() {
                     if doc.path.is_some() {
-                        let _ = doc.save();
+                        if let Some(doc) = self.active_document_mut() {
+                            let _ = doc.save();
+                        }
+                    } else {
+                        // No path - show save as dialog
+                        self.show_save_as_dialog();
                     }
-                    // TODO: Show save dialog if no path
                 }
+                return Ok(());
+            }
+            // Save As: Ctrl+Shift+S
+            (true, true, KeyCode::Char('S')) => {
+                self.show_save_as_dialog();
                 return Ok(());
             }
             // Close: Ctrl+W
@@ -407,10 +835,59 @@ impl App {
 
     /// Handle mouse events
     fn handle_mouse_event(&mut self, mouse: event::MouseEvent) -> Result<()> {
+        use crate::ui::menu_bar;
         use event::{MouseButton, MouseEventKind};
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                // Check if clicking on menu bar (row 0)
+                if mouse.row == 0 {
+                    if let Some(menu_idx) = menu_bar::menu_at_position(self, mouse.column) {
+                        if self.menu_open == Some(menu_idx) {
+                            // Clicking same menu closes it
+                            self.close_menu();
+                        } else {
+                            // Open this menu
+                            self.open_menu(menu_idx);
+                        }
+                    } else {
+                        self.close_menu();
+                    }
+                    return Ok(());
+                }
+
+                // Check if clicking in dropdown menu
+                if let Some(menu_idx) = self.menu_open {
+                    // Get dropdown bounds
+                    let x_pos = self
+                        .menu_positions
+                        .get(menu_idx)
+                        .map(|(start, _, _)| *start)
+                        .unwrap_or(0);
+
+                    if let Some((_, items)) = menu_bar::MENUS.get(menu_idx) {
+                        let dropdown_height = items.len() as u16 + 2;
+
+                        // Check if click is in dropdown area
+                        if mouse.row >= 1 && mouse.row < 1 + dropdown_height {
+                            let item_row = (mouse.row - 2) as usize; // -2 for menu bar + border
+                            if mouse.row > 1 && item_row < items.len() {
+                                if let Some(item_idx) =
+                                    menu_bar::item_at_position(menu_idx, item_row)
+                                {
+                                    self.menu_selected = Some(item_idx);
+                                    self.execute_menu_action();
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+
+                    // Click outside dropdown closes menu
+                    self.close_menu();
+                    // Don't return - let click be processed normally
+                }
+
                 // Check if clicking on a divider to start resize
                 if let Some(target) = self.check_divider_click(mouse.column, mouse.row) {
                     self.resizing = Some(target);

@@ -115,12 +115,18 @@ impl FileTree {
             show_hidden,
         };
 
-        tree.refresh();
+        tree.initial_load();
         tree
     }
 
-    /// Refresh the file tree from disk
+    /// Refresh the file tree from disk, preserving expanded states
     pub fn refresh(&mut self) {
+        // Use rebuild_entries which preserves expanded states
+        self.rebuild_entries();
+    }
+
+    /// Full refresh that collapses all directories (used for initial load)
+    fn initial_load(&mut self) {
         self.entries.clear();
 
         // Create root entry
