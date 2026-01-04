@@ -1,6 +1,7 @@
 use crate::editor::Document;
 use crate::file_tree::FileTree;
 use crate::input::InputHandler;
+use crate::terminal::Terminal;
 use crate::theme::Theme;
 use crate::ui::dialog::{Dialog, FileOpenDialog, FileSaveAsDialog};
 use crate::ui::{self, Pane};
@@ -50,6 +51,10 @@ pub struct App {
     pub menu_positions: Vec<(u16, u16, usize)>,
     /// Active dialog (if any)
     pub dialog: Option<Dialog>,
+    /// Terminal emulator
+    pub terminal: Option<Terminal>,
+    /// Last known terminal area for resize detection
+    pub terminal_area: Option<Rect>,
 }
 
 /// Which divider is being resized
@@ -89,6 +94,8 @@ impl App {
             menu_selected: None,
             menu_positions: Vec::new(),
             dialog: None,
+            terminal: Terminal::new(80, 24).ok(),
+            terminal_area: None,
         }
     }
 
@@ -403,12 +410,17 @@ impl App {
     }
 
     /// Run the main application loop
-    pub fn run(&mut self, terminal: &mut Terminal<impl Backend>) -> Result<()> {
+    pub fn run(&mut self, ratatui_terminal: &mut ratatui::Terminal<impl Backend>) -> Result<()> {
         while !self.should_quit {
+            // Read PTY output before drawing
+            if let Some(ref mut term) = self.terminal {
+                let _ = term.read_output();
+            }
+
             // Draw UI - we need to use a raw pointer trick since terminal.draw()
             // takes a closure and we need &mut self
             let app_ptr = self as *mut App;
-            terminal.draw(|frame| {
+            ratatui_terminal.draw(|frame| {
                 // SAFETY: We have exclusive access to self during this closure
                 // and the closure doesn't escape
                 unsafe {
@@ -416,14 +428,32 @@ impl App {
                 }
             })?;
 
+            // Check if terminal area changed and resize PTY
+            self.check_terminal_resize();
+
             // Handle events with a small timeout for responsiveness
-            if event::poll(Duration::from_millis(50))? {
+            if event::poll(Duration::from_millis(16))? {
                 let event = event::read()?;
                 self.handle_event(event)?;
             }
         }
 
         Ok(())
+    }
+
+    /// Check if terminal area changed and resize PTY accordingly
+    fn check_terminal_resize(&mut self) {
+        if let (Some(area), Some(ref mut term)) = (self.terminal_area, &mut self.terminal) {
+            // Account for border (1 row for top border)
+            let inner_cols = area.width.saturating_sub(0);
+            let inner_rows = area.height.saturating_sub(1);
+
+            if inner_cols != term.cols || inner_rows != term.rows {
+                if inner_cols > 0 && inner_rows > 0 {
+                    let _ = term.resize(inner_cols, inner_rows);
+                }
+            }
+        }
     }
 
     /// Handle an input event
@@ -660,7 +690,7 @@ impl App {
                 self.handle_editor_key(key)?;
             }
             Pane::Terminal => {
-                // TODO: Terminal keyboard input
+                self.handle_terminal_key(key)?;
             }
         }
         Ok(())
@@ -783,6 +813,24 @@ impl App {
             }
         }
 
+        Ok(())
+    }
+
+    /// Handle keyboard events for the terminal
+    fn handle_terminal_key(&mut self, key: event::KeyEvent) -> Result<()> {
+        // Don't pass F-keys that are used for focus switching
+        match key.code {
+            KeyCode::F(2) | KeyCode::F(3) | KeyCode::F(4) => {
+                // These are handled by global shortcuts, don't pass to terminal
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        // Pass all other keys to the terminal
+        if let Some(ref mut term) = self.terminal {
+            term.send_key(key.code, key.modifiers)?;
+        }
         Ok(())
     }
 

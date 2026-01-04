@@ -13,6 +13,7 @@ mod config;
 mod editor;
 mod file_tree;
 mod input;
+mod terminal;
 mod theme;
 mod ui;
 
