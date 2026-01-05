@@ -2,6 +2,8 @@
 
 `gterm` is a powerful, stable and lightweight programmer's text editor in the terminal that provides tons of useful features without bogging down your workflow. It runs on Linux, Windows and MacOS. This is a terminal adaptation of [Geany](https://www.geany.org).
 
+![gterm screenshot](gterm_screenshot.png)
+
 ## Features
 
 One of the primary reasons for gterm's existence is that there is a need for a decent, TUI (terminal user interface), lightweight, cross-platform, flexible and powerful IDE/editor that can be launched from a shell environment and still offer the point and click utility of a mouse and the standard file keyboard commands that most applications use.
@@ -56,34 +58,7 @@ One of the primary reasons for gterm's existence is that there is a need for a d
 
 ### Keyboard Shortcuts
 
-| Category | Action | Shortcut |
-|----------|--------|----------|
-| File | New | `Ctrl+N` |
-| File | Open | `Ctrl+O` |
-| File | Save | `Ctrl+S` |
-| File | Save As | `Ctrl+Shift+S` |
-| File | Close | `Ctrl+W` |
-| File | Quit | `Ctrl+Q` |
-| Edit | Undo | `Ctrl+Z` |
-| Edit | Redo | `Ctrl+Y` |
-| Edit | Cut | `Ctrl+X` |
-| Edit | Copy | `Ctrl+C` |
-| Edit | Paste | `Ctrl+V` |
-| Edit | Select All | `Ctrl+A` |
-| Edit | Delete Line | `Ctrl+K` |
-| Edit | Duplicate Line | `Ctrl+D` |
-| Search | Find | `Ctrl+F` |
-| Search | Find Next | `Ctrl+G` / `F3` |
-| Search | Replace | `Ctrl+H` |
-| Search | Go to Line | `Ctrl+L` |
-| Navigation | Next Tab | `Ctrl+PageDown` |
-| Navigation | Previous Tab | `Ctrl+PageUp` |
-| Navigation | Switch to Tab N | `Alt+1` - `Alt+9` |
-| View | Focus Editor | `F2` |
-| View | Focus File Tree | `F3` |
-| View | Focus Terminal | `F4` |
-| View | Toggle Sidebar | `Ctrl+Shift+B` |
-| View | Toggle Terminal | `Ctrl+Shift+T` |
+See [GUIDE.md](GUIDE.md) for a complete list of keyboard shortcuts.
 
 ### Configuration
 
