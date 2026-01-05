@@ -56,8 +56,10 @@ pub struct App {
     pub menu_positions: Vec<(u16, u16, usize)>,
     /// Active dialog (if any)
     pub dialog: Option<Dialog>,
-    /// Terminal emulator
-    pub terminal: Option<Terminal>,
+    /// Terminal emulators (up to 10)
+    pub terminals: Vec<Terminal>,
+    /// Currently active terminal index
+    pub active_terminal: usize,
     /// Last known terminal area for resize detection
     pub terminal_area: Option<Rect>,
     /// System clipboard
@@ -106,11 +108,69 @@ impl App {
             menu_selected: None,
             menu_positions: Vec::new(),
             dialog: None,
-            terminal: Terminal::new(80, 24).ok(),
+            terminals: Terminal::new(80, 24).map(|t| vec![t]).unwrap_or_default(),
+            active_terminal: 0,
             terminal_area: None,
             clipboard: Clipboard::new(),
             highlighting: HighlightingManager::new(),
             search: SearchState::new(),
+        }
+    }
+
+    /// Get the active terminal
+    pub fn active_terminal(&self) -> Option<&Terminal> {
+        self.terminals.get(self.active_terminal)
+    }
+
+    /// Get the active terminal mutably
+    pub fn active_terminal_mut(&mut self) -> Option<&mut Terminal> {
+        self.terminals.get_mut(self.active_terminal)
+    }
+
+    /// Create a new terminal (up to 10 max)
+    pub fn new_terminal(&mut self) {
+        if self.terminals.len() >= 10 {
+            return; // Max 10 terminals
+        }
+        if let Ok(term) = Terminal::new(80, 24) {
+            self.terminals.push(term);
+            self.active_terminal = self.terminals.len() - 1;
+        }
+    }
+
+    /// Close the active terminal
+    pub fn close_terminal(&mut self) {
+        if self.terminals.is_empty() {
+            return;
+        }
+        self.terminals.remove(self.active_terminal);
+        if self.active_terminal >= self.terminals.len() && !self.terminals.is_empty() {
+            self.active_terminal = self.terminals.len() - 1;
+        }
+    }
+
+    /// Switch to a specific terminal by index
+    pub fn switch_terminal(&mut self, index: usize) {
+        if index < self.terminals.len() {
+            self.active_terminal = index;
+        }
+    }
+
+    /// Switch to next terminal
+    pub fn next_terminal(&mut self) {
+        if !self.terminals.is_empty() {
+            self.active_terminal = (self.active_terminal + 1) % self.terminals.len();
+        }
+    }
+
+    /// Switch to previous terminal
+    pub fn prev_terminal(&mut self) {
+        if !self.terminals.is_empty() {
+            self.active_terminal = if self.active_terminal == 0 {
+                self.terminals.len() - 1
+            } else {
+                self.active_terminal - 1
+            };
         }
     }
 
@@ -364,6 +424,21 @@ impl App {
                             }
                         }
 
+                        MenuAction::NewTerminal => {
+                            self.new_terminal();
+                            self.show_terminal = true;
+                            self.focused_pane = Pane::Terminal;
+                        }
+                        MenuAction::CloseTerminal => {
+                            self.close_terminal();
+                        }
+                        MenuAction::NextTerminal => {
+                            self.next_terminal();
+                        }
+                        MenuAction::PrevTerminal => {
+                            self.prev_terminal();
+                        }
+
                         MenuAction::About => {
                             // TODO: Show about dialog
                         }
@@ -496,8 +571,8 @@ impl App {
     /// Run the main application loop
     pub fn run(&mut self, ratatui_terminal: &mut ratatui::Terminal<impl Backend>) -> Result<()> {
         while !self.should_quit {
-            // Read PTY output before drawing
-            if let Some(ref mut term) = self.terminal {
+            // Read PTY output from all terminals before drawing
+            for term in &mut self.terminals {
                 let _ = term.read_output();
             }
 
@@ -527,14 +602,17 @@ impl App {
 
     /// Check if terminal area changed and resize PTY accordingly
     fn check_terminal_resize(&mut self) {
-        if let (Some(area), Some(ref mut term)) = (self.terminal_area, &mut self.terminal) {
-            // Account for border (1 row for top border)
-            let inner_cols = area.width.saturating_sub(0);
-            let inner_rows = area.height.saturating_sub(1);
+        if let Some(area) = self.terminal_area {
+            // Account for border (1 row for top border + 1 for tab bar)
+            let inner_cols = area.width;
+            let inner_rows = area.height.saturating_sub(2);
 
-            if inner_cols != term.cols || inner_rows != term.rows {
-                if inner_cols > 0 && inner_rows > 0 {
-                    let _ = term.resize(inner_cols, inner_rows);
+            // Resize all terminals to match
+            for term in &mut self.terminals {
+                if inner_cols != term.cols || inner_rows != term.rows {
+                    if inner_cols > 0 && inner_rows > 0 {
+                        let _ = term.resize(inner_cols, inner_rows);
+                    }
                 }
             }
         }
@@ -646,6 +724,30 @@ impl App {
                 if self.show_terminal {
                     self.focused_pane = Pane::Terminal;
                 }
+            }
+            // New terminal: Ctrl+N (when terminal focused)
+            (KeyModifiers::CONTROL, KeyCode::Char('n')) if self.focused_pane == Pane::Terminal => {
+                self.new_terminal();
+                self.show_terminal = true;
+            }
+            // Close terminal: Ctrl+W (when terminal focused)
+            (KeyModifiers::CONTROL, KeyCode::Char('w')) if self.focused_pane == Pane::Terminal => {
+                self.close_terminal();
+            }
+            // Next terminal: Alt+. (when terminal focused)
+            (KeyModifiers::ALT, KeyCode::Char('.')) if self.focused_pane == Pane::Terminal => {
+                self.next_terminal();
+            }
+            // Previous terminal: Alt+, (when terminal focused)
+            (KeyModifiers::ALT, KeyCode::Char(',')) if self.focused_pane == Pane::Terminal => {
+                self.prev_terminal();
+            }
+            // Alt+1-9 to switch terminals (when terminal focused)
+            (KeyModifiers::ALT, KeyCode::Char(c @ '1'..='9'))
+                if self.focused_pane == Pane::Terminal =>
+            {
+                let idx = (c as u8 - b'1') as usize;
+                self.switch_terminal(idx);
             }
             // Tab to cycle focus (only when menu closed and not in editor)
             (KeyModifiers::NONE, KeyCode::Tab) if self.focused_pane != Pane::Editor => {
@@ -1029,20 +1131,20 @@ impl App {
         if shift {
             match key.code {
                 KeyCode::PageUp => {
-                    if let Some(ref mut term) = self.terminal {
+                    if let Some(term) = self.active_terminal_mut() {
                         term.scroll_up(10);
                     }
                     return Ok(());
                 }
                 KeyCode::PageDown => {
-                    if let Some(ref mut term) = self.terminal {
+                    if let Some(term) = self.active_terminal_mut() {
                         term.scroll_down(10);
                     }
                     return Ok(());
                 }
                 KeyCode::Home => {
                     // Scroll to top of scrollback
-                    if let Some(ref mut term) = self.terminal {
+                    if let Some(term) = self.active_terminal_mut() {
                         let max = term.max_scrollback();
                         term.scroll_up(max);
                     }
@@ -1050,7 +1152,7 @@ impl App {
                 }
                 KeyCode::End => {
                     // Scroll to bottom (current output)
-                    if let Some(ref mut term) = self.terminal {
+                    if let Some(term) = self.active_terminal_mut() {
                         term.scroll_to_bottom();
                     }
                     return Ok(());
@@ -1060,7 +1162,7 @@ impl App {
         }
 
         // When user types, scroll to bottom to show current output
-        if let Some(ref mut term) = self.terminal {
+        if let Some(term) = self.active_terminal_mut() {
             if term.is_scrolled_back() {
                 // Any regular key input scrolls back to bottom
                 match key.code {
@@ -1227,7 +1329,7 @@ impl App {
                     }
                 }
                 Pane::Terminal => {
-                    if let Some(ref mut term) = self.terminal {
+                    if let Some(term) = self.active_terminal_mut() {
                         term.scroll_up(3);
                     }
                 }
@@ -1245,7 +1347,7 @@ impl App {
                     }
                 }
                 Pane::Terminal => {
-                    if let Some(ref mut term) = self.terminal {
+                    if let Some(term) = self.active_terminal_mut() {
                         term.scroll_down(3);
                     }
                 }

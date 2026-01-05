@@ -49,6 +49,12 @@ pub enum MenuAction {
     FocusFileTree,
     FocusTerminal,
 
+    // Terminal menu
+    NewTerminal,
+    CloseTerminal,
+    NextTerminal,
+    PrevTerminal,
+
     // Help menu
     About,
 
@@ -260,6 +266,41 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
                 label: "Focus Terminal",
                 shortcut: Some("F4"),
                 action: MenuAction::FocusTerminal,
+                enabled: true,
+            },
+        ],
+    ),
+    (
+        "Terminal",
+        &[
+            MenuItem {
+                label: "New Terminal",
+                shortcut: Some("Ctrl+N"),
+                action: MenuAction::NewTerminal,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Close Terminal",
+                shortcut: Some("Ctrl+W"),
+                action: MenuAction::CloseTerminal,
+                enabled: true,
+            },
+            MenuItem {
+                label: "─────────",
+                shortcut: None,
+                action: MenuAction::Separator,
+                enabled: false,
+            },
+            MenuItem {
+                label: "Next Terminal",
+                shortcut: Some("Alt+."),
+                action: MenuAction::NextTerminal,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Previous Terminal",
+                shortcut: Some("Alt+,"),
+                action: MenuAction::PrevTerminal,
                 enabled: true,
             },
         ],

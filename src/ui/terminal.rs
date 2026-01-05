@@ -1,10 +1,10 @@
 use crate::app::App;
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Tabs},
 };
 
-/// Draw the terminal pane
+/// Draw the terminal pane with tab bar for multiple terminals
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect, focused: bool) {
     let border_color = if focused {
         app.theme.border_focused
@@ -12,36 +12,78 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect, focused: bool) {
         app.theme.border
     };
 
-    // Show scroll indicator in title when scrolled back
-    let title = app
-        .terminal
-        .as_ref()
-        .map(|t| {
-            let parser = t.screen();
-            let screen = parser.screen();
-            let offset = screen.scrollback();
-            if offset > 0 {
-                format!(" Terminal [-{}] ", offset)
-            } else {
-                " Terminal ".to_string()
-            }
-        })
-        .unwrap_or_else(|| " Terminal ".to_string());
+    // Split area: tab bar on top, terminal content below
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Tab bar
+            Constraint::Min(1),    // Terminal content
+        ])
+        .split(area);
 
+    // Draw terminal tab bar
+    draw_terminal_tabs(frame, app, chunks[0], focused);
+
+    // Store terminal area for resize detection
+    app.terminal_area = Some(area);
+
+    // Draw active terminal content
+    draw_terminal_content(frame, app, chunks[1], focused);
+}
+
+/// Draw the terminal tab bar
+fn draw_terminal_tabs(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
+    if app.terminals.is_empty() {
+        // No terminals - show empty bar
+        let block = Block::default().style(Style::default().bg(app.theme.statusbar_bg));
+        frame.render_widget(block, area);
+        return;
+    }
+
+    // Build tab titles
+    let titles: Vec<Line> = app
+        .terminals
+        .iter()
+        .enumerate()
+        .map(|(i, term)| {
+            let parser = term.screen();
+            let screen = parser.screen();
+            let scroll_offset = screen.scrollback();
+
+            let title = if scroll_offset > 0 {
+                format!(" Terminal {} [-{}] ", i + 1, scroll_offset)
+            } else {
+                format!(" Terminal {} ", i + 1)
+            };
+            Line::from(title)
+        })
+        .collect();
+
+    let tabs = Tabs::new(titles)
+        .select(app.active_terminal)
+        .style(Style::default().fg(app.theme.fg).bg(app.theme.terminal_bg))
+        .highlight_style(
+            Style::default()
+                .fg(app.theme.fg)
+                .bg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        )
+        .divider("|");
+
+    frame.render_widget(tabs, area);
+}
+
+/// Draw the terminal content for the active terminal
+fn draw_terminal_content(frame: &mut Frame, app: &mut App, area: Rect, focused: bool) {
     let block = Block::default()
-        .title(title)
-        .borders(Borders::TOP)
-        .border_style(Style::default().fg(border_color))
+        .borders(Borders::NONE)
         .style(Style::default().bg(app.theme.terminal_bg));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Store terminal area for resize detection
-    app.terminal_area = Some(area);
-
     // Render terminal content from PTY
-    if let Some(ref term) = app.terminal {
+    if let Some(term) = app.active_terminal() {
         let parser = term.screen();
         let screen = parser.screen();
 
@@ -120,8 +162,8 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect, focused: bool) {
             }
         }
     } else {
-        // No terminal - show placeholder
-        let placeholder = Paragraph::new("Terminal not available")
+        // No terminal - show placeholder with hint
+        let placeholder = Paragraph::new("No terminal. Press Ctrl+Shift+N to create one.")
             .style(Style::default().fg(app.theme.line_number))
             .alignment(Alignment::Center);
         frame.render_widget(placeholder, inner);
