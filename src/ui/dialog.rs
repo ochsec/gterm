@@ -14,6 +14,8 @@ pub enum Dialog {
     FileSaveAs(FileSaveAsDialog),
     /// Message/alert dialog
     Message(MessageDialog),
+    /// Go to line dialog
+    GoToLine(GoToLineDialog),
 }
 
 /// File open dialog state
@@ -61,6 +63,17 @@ pub struct FileSaveAsDialog {
 pub struct MessageDialog {
     pub title: String,
     pub message: String,
+}
+
+/// Go to line dialog
+#[derive(Debug, Clone)]
+pub struct GoToLineDialog {
+    /// Line number input
+    pub input: String,
+    /// Total lines in document (for display)
+    pub total_lines: usize,
+    /// Error message if invalid input
+    pub error: Option<String>,
 }
 
 impl FileSaveAsDialog {
@@ -206,6 +219,57 @@ impl FileSaveAsDialog {
     /// Get the currently selected entry
     pub fn selected_entry(&self) -> Option<&DirEntry> {
         self.entries.get(self.selected)
+    }
+}
+
+impl GoToLineDialog {
+    /// Create a new go to line dialog
+    pub fn new(total_lines: usize) -> Self {
+        Self {
+            input: String::new(),
+            total_lines,
+            error: None,
+        }
+    }
+
+    /// Handle character input (only digits allowed)
+    pub fn handle_input(&mut self, c: char) {
+        if c.is_ascii_digit() {
+            self.input.push(c);
+            self.error = None;
+        }
+    }
+
+    /// Handle backspace
+    pub fn handle_backspace(&mut self) {
+        self.input.pop();
+        self.error = None;
+    }
+
+    /// Parse and validate the line number, returns 0-indexed line if valid
+    pub fn get_line_number(&mut self) -> Option<usize> {
+        if self.input.is_empty() {
+            self.error = Some("Enter a line number".to_string());
+            return None;
+        }
+
+        match self.input.parse::<usize>() {
+            Ok(line) if line >= 1 && line <= self.total_lines => {
+                Some(line - 1) // Convert to 0-indexed
+            }
+            Ok(line) if line == 0 => {
+                self.error = Some("Line number must be at least 1".to_string());
+                None
+            }
+            Ok(_) => {
+                self.error = Some(format!("Line must be 1-{}", self.total_lines));
+                None
+            }
+            Err(_) => {
+                self.error = Some("Invalid number".to_string());
+                None
+            }
+        }
     }
 }
 
@@ -638,6 +702,68 @@ pub fn draw_message_dialog(frame: &mut Frame, app: &App, dialog: &MessageDialog)
     frame.render_widget(message, inner);
 }
 
+/// Draw a go to line dialog
+pub fn draw_go_to_line_dialog(frame: &mut Frame, app: &App, dialog: &GoToLineDialog) {
+    let area = frame.area();
+
+    // Small dialog centered on screen
+    let dialog_width = 40u16.min(area.width - 4);
+    let dialog_height = 6u16;
+    let dialog_x = (area.width - dialog_width) / 2;
+    let dialog_y = (area.height - dialog_height) / 2;
+
+    let dialog_area = Rect {
+        x: dialog_x,
+        y: dialog_y,
+        width: dialog_width,
+        height: dialog_height,
+    };
+
+    // Clear area behind dialog
+    frame.render_widget(Clear, dialog_area);
+
+    // Draw dialog border
+    let block = Block::default()
+        .title(" Go to Line ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.border_focused))
+        .style(Style::default().bg(app.theme.sidebar_bg));
+
+    let inner = block.inner(dialog_area);
+    frame.render_widget(block, dialog_area);
+
+    // Split inner area: input (1 line), info/error (1 line), help (1 line)
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Input
+            Constraint::Length(1), // Info/error
+            Constraint::Length(1), // Help
+        ])
+        .split(inner);
+
+    // Draw input field
+    let input_text = format!("Line: {}|", dialog.input);
+    let input =
+        Paragraph::new(input_text).style(Style::default().fg(app.theme.fg).bg(app.theme.editor_bg));
+    frame.render_widget(input, chunks[0]);
+
+    // Draw info or error
+    let info_text = if let Some(ref error) = dialog.error {
+        Paragraph::new(error.as_str()).style(Style::default().fg(Color::Red))
+    } else {
+        Paragraph::new(format!("(1-{})", dialog.total_lines))
+            .style(Style::default().fg(app.theme.line_number))
+    };
+    frame.render_widget(info_text, chunks[1]);
+
+    // Draw help
+    let help = Paragraph::new("Enter: Go  Esc: Cancel")
+        .style(Style::default().fg(app.theme.line_number))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, chunks[2]);
+}
+
 /// Draw the active dialog (if any)
 pub fn draw_dialog(frame: &mut Frame, app: &App) {
     if let Some(dialog) = &app.dialog {
@@ -645,6 +771,7 @@ pub fn draw_dialog(frame: &mut Frame, app: &App) {
             Dialog::FileOpen(d) => draw_file_open_dialog(frame, app, d),
             Dialog::FileSaveAs(d) => draw_file_save_as_dialog(frame, app, d),
             Dialog::Message(d) => draw_message_dialog(frame, app, d),
+            Dialog::GoToLine(d) => draw_go_to_line_dialog(frame, app, d),
         }
     }
 }

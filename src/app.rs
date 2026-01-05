@@ -5,7 +5,7 @@ use crate::input::InputHandler;
 use crate::search::SearchState;
 use crate::terminal::Terminal;
 use crate::theme::Theme;
-use crate::ui::dialog::{Dialog, FileOpenDialog, FileSaveAsDialog};
+use crate::ui::dialog::{Dialog, FileOpenDialog, FileSaveAsDialog, GoToLineDialog};
 use crate::ui::{self, Pane};
 use crate::utils::clipboard::Clipboard;
 use anyhow::Result;
@@ -216,6 +216,15 @@ impl App {
         self.dialog = None;
     }
 
+    /// Open the go to line dialog
+    pub fn show_go_to_line_dialog(&mut self) {
+        let total_lines = self
+            .active_document()
+            .map(|doc| doc.line_count())
+            .unwrap_or(1);
+        self.dialog = Some(Dialog::GoToLine(GoToLineDialog::new(total_lines)));
+    }
+
     /// Check if a dialog is open
     pub fn has_dialog(&self) -> bool {
         self.dialog.is_some()
@@ -398,7 +407,7 @@ impl App {
                             self.focused_pane = Pane::Editor;
                         }
                         MenuAction::GoToLine => {
-                            // TODO: Open go to line dialog
+                            self.show_go_to_line_dialog();
                         }
 
                         MenuAction::ToggleSidebar => {
@@ -725,6 +734,10 @@ impl App {
                     self.focused_pane = Pane::Terminal;
                 }
             }
+            // Go to Line: Ctrl+G (global, works from any pane)
+            (KeyModifiers::CONTROL, KeyCode::Char('g')) => {
+                self.show_go_to_line_dialog();
+            }
             // New terminal: Ctrl+N (when terminal focused)
             (KeyModifiers::CONTROL, KeyCode::Char('n')) if self.focused_pane == Pane::Terminal => {
                 self.new_terminal();
@@ -876,6 +889,31 @@ impl App {
                 // Any key closes message dialog
                 self.dialog = None;
             }
+            Dialog::GoToLine(ref mut go_to_dialog) => {
+                match key.code {
+                    KeyCode::Esc => {
+                        self.dialog = None;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(line) = go_to_dialog.get_line_number() {
+                            // Go to the line
+                            if let Some(doc) = self.active_document_mut() {
+                                doc.move_to(line, 0, false);
+                                doc.ensure_cursor_visible(30, 80);
+                            }
+                            self.dialog = None;
+                        }
+                        // If get_line_number returned None, error is set and dialog stays open
+                    }
+                    KeyCode::Backspace => {
+                        go_to_dialog.handle_backspace();
+                    }
+                    KeyCode::Char(c) => {
+                        go_to_dialog.handle_input(c);
+                    }
+                    _ => {}
+                }
+            }
         }
 
         Ok(())
@@ -883,43 +921,162 @@ impl App {
 
     /// Handle keyboard events for the search bar
     fn handle_search_key(&mut self, key: event::KeyEvent) -> Result<()> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
         match key.code {
             KeyCode::Esc => {
                 self.search.close();
             }
+            KeyCode::Tab => {
+                // Tab switches between find and replace fields
+                self.search.toggle_replace_focus();
+            }
             KeyCode::Enter => {
-                // Find next match
-                self.find_next();
+                if self.search.replace_mode {
+                    // In replace mode, Enter replaces current match and finds next
+                    self.replace_current();
+                } else {
+                    // In find mode, Enter finds next match
+                    self.find_next();
+                }
             }
             KeyCode::Backspace => {
-                self.search.backspace();
-                self.do_search();
+                if self.search.replace_mode && self.search.replace_focus == 1 {
+                    self.search.replace_backspace();
+                } else {
+                    self.search.backspace();
+                    self.do_search();
+                }
             }
             KeyCode::Char(c) => {
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    // Handle Ctrl+G for next, Ctrl+Shift+G for prev
+                if ctrl {
+                    // Handle Ctrl shortcuts
                     match c {
                         'g' => self.find_next(),
                         'G' => self.find_prev(),
+                        'a' | 'A' => {
+                            // Ctrl+A in replace mode: replace all
+                            if self.search.replace_mode {
+                                self.replace_all();
+                            }
+                        }
                         'f' => {
-                            // Ctrl+F while search is open - just keep it open
+                            // Ctrl+F while search is open - switch to find mode
+                            self.search.replace_mode = false;
+                        }
+                        'h' => {
+                            // Ctrl+H while search is open - switch to replace mode
+                            self.search.replace_mode = true;
                         }
                         _ => {}
                     }
                 } else {
-                    self.search.input_char(c);
-                    self.do_search();
+                    // Regular character input
+                    if self.search.replace_mode && self.search.replace_focus == 1 {
+                        self.search.replace_input_char(c);
+                    } else {
+                        self.search.input_char(c);
+                        self.do_search();
+                    }
                 }
             }
-            KeyCode::Up | KeyCode::F(3) if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            KeyCode::Up => {
+                if self.search.replace_mode {
+                    // Up arrow moves to find field
+                    self.search.replace_focus = 0;
+                } else if shift {
+                    self.find_prev();
+                }
+            }
+            KeyCode::Down => {
+                if self.search.replace_mode {
+                    // Down arrow moves to replace field
+                    self.search.replace_focus = 1;
+                } else {
+                    self.find_next();
+                }
+            }
+            KeyCode::F(3) if shift => {
                 self.find_prev();
             }
-            KeyCode::Down | KeyCode::F(3) => {
+            KeyCode::F(3) => {
                 self.find_next();
             }
             _ => {}
         }
         Ok(())
+    }
+
+    /// Replace the current match with the replacement text
+    fn replace_current(&mut self) {
+        if !self.search.replace_mode {
+            return;
+        }
+
+        // Get the current match
+        if let Some(m) = self.search.current() {
+            let replace_text = self.search.replace_text.clone();
+
+            // Replace in the document
+            if let Some(doc) = self.active_document_mut() {
+                // Move to the match position
+                doc.move_to(m.line, m.start_col, false);
+                // Select the match
+                doc.selection.anchor = doc.cursor;
+                doc.cursor.col = m.end_col;
+                doc.selection.head = doc.cursor;
+                // Delete and insert replacement
+                doc.delete_selection();
+                doc.insert_str(&replace_text);
+            }
+
+            // Re-search to update matches
+            self.do_search();
+            // Find next match
+            self.find_next();
+        } else {
+            // No current match, try to find one
+            self.find_next();
+        }
+    }
+
+    /// Replace all matches with the replacement text
+    fn replace_all(&mut self) {
+        if !self.search.replace_mode || self.search.matches.is_empty() {
+            return;
+        }
+
+        let replace_text = self.search.replace_text.clone();
+        let query_len = self.search.query.len();
+
+        // Get all matches, sorted in reverse order (bottom to top, right to left)
+        // so that replacing doesn't mess up the positions of other matches
+        let mut matches = self.search.matches.clone();
+        matches.sort_by(|a, b| {
+            if a.line != b.line {
+                b.line.cmp(&a.line) // Reverse line order
+            } else {
+                b.start_col.cmp(&a.start_col) // Reverse column order
+            }
+        });
+
+        if let Some(doc) = self.active_document_mut() {
+            for m in matches {
+                // Move to the match position
+                doc.move_to(m.line, m.start_col, false);
+                // Select the match
+                doc.selection.anchor = doc.cursor;
+                doc.cursor.col = m.end_col;
+                doc.selection.head = doc.cursor;
+                // Delete and insert replacement
+                doc.delete_selection();
+                doc.insert_str(&replace_text);
+            }
+        }
+
+        // Re-search to update (should find no matches now if replacement doesn't contain search term)
+        self.do_search();
     }
 
     /// Handle key events for the currently focused pane

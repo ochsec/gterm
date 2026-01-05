@@ -223,7 +223,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             },
             MenuItem {
                 label: "Go to Line...",
-                shortcut: Some("Ctrl+L"),
+                shortcut: Some("Ctrl+G"),
                 action: MenuAction::GoToLine,
                 enabled: true,
             },
@@ -255,6 +255,12 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
                 shortcut: None,
                 action: MenuAction::Separator,
                 enabled: false,
+            },
+            MenuItem {
+                label: "Focus Editor",
+                shortcut: Some("F2"),
+                action: MenuAction::FocusEditor,
+                enabled: true,
             },
             MenuItem {
                 label: "Focus File Tree",

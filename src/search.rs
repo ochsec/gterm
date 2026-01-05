@@ -31,6 +31,8 @@ pub struct SearchState {
     pub replace_mode: bool,
     /// Replacement text
     pub replace_text: String,
+    /// Which field is focused in replace mode: 0 = search, 1 = replace
+    pub replace_focus: usize,
 }
 
 impl Default for SearchState {
@@ -50,6 +52,7 @@ impl SearchState {
             current_match: None,
             replace_mode: false,
             replace_text: String::new(),
+            replace_focus: 0,
         }
     }
 
@@ -63,6 +66,14 @@ impl SearchState {
     pub fn open_replace(&mut self) {
         self.active = true;
         self.replace_mode = true;
+        self.replace_focus = 0; // Start focused on search field
+    }
+
+    /// Toggle focus between search and replace fields
+    pub fn toggle_replace_focus(&mut self) {
+        if self.replace_mode {
+            self.replace_focus = if self.replace_focus == 0 { 1 } else { 0 };
+        }
     }
 
     /// Close the search bar
