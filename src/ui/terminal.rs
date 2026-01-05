@@ -12,7 +12,21 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect, focused: bool) {
         app.theme.border
     };
 
-    let title = if focused { " Terminal " } else { " Terminal " };
+    // Show scroll indicator in title when scrolled back
+    let title = app
+        .terminal
+        .as_ref()
+        .map(|t| {
+            let parser = t.screen();
+            let screen = parser.screen();
+            let offset = screen.scrollback();
+            if offset > 0 {
+                format!(" Terminal [-{}] ", offset)
+            } else {
+                " Terminal ".to_string()
+            }
+        })
+        .unwrap_or_else(|| " Terminal ".to_string());
 
     let block = Block::default()
         .title(title)

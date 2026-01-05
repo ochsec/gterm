@@ -18,6 +18,8 @@ pub struct Terminal {
     /// Current terminal size
     pub cols: u16,
     pub rows: u16,
+    /// Scroll offset (0 = at bottom/current, positive = scrolled up)
+    pub scroll_offset: usize,
 }
 
 impl Terminal {
@@ -83,6 +85,7 @@ impl Terminal {
             rx,
             cols,
             rows,
+            scroll_offset: 0,
         })
     }
 
@@ -210,5 +213,49 @@ impl Terminal {
     /// Get the current screen contents
     pub fn screen(&self) -> std::sync::MutexGuard<'_, vt100::Parser> {
         self.parser.lock().unwrap()
+    }
+
+    /// Scroll up in the scrollback buffer
+    pub fn scroll_up(&mut self, lines: usize) {
+        let mut parser = self.parser.lock().unwrap();
+        let current = parser.screen().scrollback();
+        let new_offset = current + lines;
+        parser.set_scrollback(new_offset);
+        // Update our tracking (parser clamps to actual available)
+        self.scroll_offset = parser.screen().scrollback();
+    }
+
+    /// Scroll down in the scrollback buffer
+    pub fn scroll_down(&mut self, lines: usize) {
+        let mut parser = self.parser.lock().unwrap();
+        let current = parser.screen().scrollback();
+        let new_offset = current.saturating_sub(lines);
+        parser.set_scrollback(new_offset);
+        self.scroll_offset = new_offset;
+    }
+
+    /// Scroll to the bottom (most recent output)
+    pub fn scroll_to_bottom(&mut self) {
+        let mut parser = self.parser.lock().unwrap();
+        parser.set_scrollback(0);
+        self.scroll_offset = 0;
+    }
+
+    /// Check if we're scrolled back (not at the bottom)
+    pub fn is_scrolled_back(&self) -> bool {
+        let parser = self.parser.lock().unwrap();
+        parser.screen().scrollback() > 0
+    }
+
+    /// Get the maximum scrollback size (configured limit, not current content)
+    pub fn max_scrollback(&self) -> usize {
+        // We configured 1000 lines of scrollback
+        1000
+    }
+
+    /// Get the current scrollback offset
+    pub fn current_scrollback(&self) -> usize {
+        let parser = self.parser.lock().unwrap();
+        parser.screen().scrollback()
     }
 }

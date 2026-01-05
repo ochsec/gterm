@@ -40,7 +40,7 @@ impl LineEnding {
 }
 
 /// A document represents an open file with its buffer, cursor, and metadata
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Document {
     /// The text buffer
     pub buffer: Buffer,

@@ -1,6 +1,8 @@
 use crate::editor::Document;
 use crate::file_tree::FileTree;
+use crate::highlighting::HighlightingManager;
 use crate::input::InputHandler;
+use crate::search::SearchState;
 use crate::terminal::Terminal;
 use crate::theme::Theme;
 use crate::ui::dialog::{Dialog, FileOpenDialog, FileSaveAsDialog};
@@ -20,6 +22,8 @@ pub struct App {
     pub focused_pane: Pane,
     /// Whether the sidebar is visible
     pub show_sidebar: bool,
+    /// Whether the editor pane is visible
+    pub show_editor: bool,
     /// Whether the terminal pane is visible
     pub show_terminal: bool,
     /// Sidebar width as percentage (0-100)
@@ -58,6 +62,10 @@ pub struct App {
     pub terminal_area: Option<Rect>,
     /// System clipboard
     pub clipboard: Clipboard,
+    /// Syntax highlighting manager
+    pub highlighting: HighlightingManager,
+    /// Search state
+    pub search: SearchState,
 }
 
 /// Which divider is being resized
@@ -81,6 +89,7 @@ impl App {
             should_quit: false,
             focused_pane: Pane::Editor,
             show_sidebar: true,
+            show_editor: true,
             show_terminal: true,
             sidebar_width_percent: 20,
             terminal_height_percent: 50,
@@ -100,6 +109,8 @@ impl App {
             terminal: Terminal::new(80, 24).ok(),
             terminal_area: None,
             clipboard: Clipboard::new(),
+            highlighting: HighlightingManager::new(),
+            search: SearchState::new(),
         }
     }
 
@@ -313,16 +324,18 @@ impl App {
                         }
 
                         MenuAction::Find => {
-                            // TODO: Open find dialog
+                            self.search.open();
+                            self.focused_pane = Pane::Editor;
                         }
                         MenuAction::FindNext => {
-                            // TODO: Find next
+                            self.find_next();
                         }
                         MenuAction::FindPrevious => {
-                            // TODO: Find previous
+                            self.find_prev();
                         }
                         MenuAction::Replace => {
-                            // TODO: Open replace dialog
+                            self.search.open_replace();
+                            self.focused_pane = Pane::Editor;
                         }
                         MenuAction::GoToLine => {
                             // TODO: Open go to line dialog
@@ -330,6 +343,9 @@ impl App {
 
                         MenuAction::ToggleSidebar => {
                             self.show_sidebar = !self.show_sidebar;
+                        }
+                        MenuAction::ToggleEditor => {
+                            self.show_editor = !self.show_editor;
                         }
                         MenuAction::ToggleTerminal => {
                             self.show_terminal = !self.show_terminal;
@@ -431,6 +447,52 @@ impl App {
         }
     }
 
+    /// Perform search with current query in active document
+    pub fn do_search(&mut self) {
+        // Clone the document to avoid borrow issues
+        let doc_clone = match self.documents.get(self.active_doc) {
+            Some(doc) => doc.clone(),
+            None => return,
+        };
+        self.search.search(&doc_clone);
+    }
+
+    /// Find the next search match and move cursor to it
+    pub fn find_next(&mut self) {
+        if let Some(doc) = self.active_document() {
+            let (line, col) = (doc.cursor.line, doc.cursor.col);
+            if let Some(m) = self.search.find_next_from(line, col) {
+                if let Some(doc) = self.active_document_mut() {
+                    doc.move_to(m.line, m.start_col, false);
+                    // Select the match
+                    doc.selection.anchor = doc.cursor;
+                    doc.cursor.col = m.end_col;
+                    doc.selection.head = doc.cursor;
+                    // Scroll to make cursor visible (use reasonable defaults)
+                    doc.ensure_cursor_visible(30, 80);
+                }
+            }
+        }
+    }
+
+    /// Find the previous search match and move cursor to it
+    pub fn find_prev(&mut self) {
+        if let Some(doc) = self.active_document() {
+            let (line, col) = (doc.cursor.line, doc.cursor.col);
+            if let Some(m) = self.search.find_prev_from(line, col) {
+                if let Some(doc) = self.active_document_mut() {
+                    doc.move_to(m.line, m.start_col, false);
+                    // Select the match
+                    doc.selection.anchor = doc.cursor;
+                    doc.cursor.col = m.end_col;
+                    doc.selection.head = doc.cursor;
+                    // Scroll to make cursor visible (use reasonable defaults)
+                    doc.ensure_cursor_visible(30, 80);
+                }
+            }
+        }
+    }
+
     /// Run the main application loop
     pub fn run(&mut self, ratatui_terminal: &mut ratatui::Terminal<impl Backend>) -> Result<()> {
         while !self.should_quit {
@@ -498,6 +560,11 @@ impl App {
             return self.handle_dialog_key(key);
         }
 
+        // If search is active, handle search input
+        if self.search.active {
+            return self.handle_search_key(key);
+        }
+
         // If menu is open, handle menu navigation first
         if self.menu_open.is_some() {
             match key.code {
@@ -541,18 +608,28 @@ impl App {
         }
 
         // Global shortcuts (work regardless of focus)
+        // Note: Handle Ctrl+Shift combos by checking for both uppercase letter (when shift works)
+        // and checking for Shift modifier with lowercase (for terminals that report it differently)
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let ctrl_shift = ctrl && shift;
+
         match (key.modifiers, key.code) {
             // Quit: Ctrl+Q
             (KeyModifiers::CONTROL, KeyCode::Char('q')) => {
                 self.should_quit = true;
             }
-            // Toggle sidebar: Ctrl+Shift+B
-            (m, KeyCode::Char('B')) if m.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+            // Toggle sidebar: Ctrl+B
+            (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
                 self.show_sidebar = !self.show_sidebar;
             }
-            // Toggle terminal: Ctrl+Shift+T
-            (m, KeyCode::Char('T')) if m.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+            // Toggle terminal: Ctrl+T
+            (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
                 self.show_terminal = !self.show_terminal;
+            }
+            // Toggle editor: Ctrl+E
+            (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
+                self.show_editor = !self.show_editor;
             }
             // Focus file tree: F3
             (KeyModifiers::NONE, KeyCode::F(3)) => {
@@ -702,6 +779,47 @@ impl App {
         Ok(())
     }
 
+    /// Handle keyboard events for the search bar
+    fn handle_search_key(&mut self, key: event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.search.close();
+            }
+            KeyCode::Enter => {
+                // Find next match
+                self.find_next();
+            }
+            KeyCode::Backspace => {
+                self.search.backspace();
+                self.do_search();
+            }
+            KeyCode::Char(c) => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    // Handle Ctrl+G for next, Ctrl+Shift+G for prev
+                    match c {
+                        'g' => self.find_next(),
+                        'G' => self.find_prev(),
+                        'f' => {
+                            // Ctrl+F while search is open - just keep it open
+                        }
+                        _ => {}
+                    }
+                } else {
+                    self.search.input_char(c);
+                    self.do_search();
+                }
+            }
+            KeyCode::Up | KeyCode::F(3) if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.find_prev();
+            }
+            KeyCode::Down | KeyCode::F(3) => {
+                self.find_next();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Handle key events for the currently focused pane
     fn handle_pane_key_event(&mut self, key: event::KeyEvent) -> Result<()> {
         match self.focused_pane {
@@ -809,6 +927,30 @@ impl App {
                 }
                 return Ok(());
             }
+            // Find: Ctrl+F
+            (true, false, KeyCode::Char('f')) => {
+                self.search.open();
+                return Ok(());
+            }
+            // Replace: Ctrl+H
+            (true, false, KeyCode::Char('h')) => {
+                self.search.open_replace();
+                return Ok(());
+            }
+            // Find Next: F3
+            (false, false, KeyCode::F(3)) => {
+                if !self.search.query.is_empty() {
+                    self.find_next();
+                }
+                return Ok(());
+            }
+            // Find Previous: Shift+F3
+            (false, true, KeyCode::F(3)) => {
+                if !self.search.query.is_empty() {
+                    self.find_prev();
+                }
+                return Ok(());
+            }
             _ => {}
         }
 
@@ -872,6 +1014,8 @@ impl App {
 
     /// Handle keyboard events for the terminal
     fn handle_terminal_key(&mut self, key: event::KeyEvent) -> Result<()> {
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
         // Don't pass F-keys that are used for focus switching
         match key.code {
             KeyCode::F(2) | KeyCode::F(3) | KeyCode::F(4) => {
@@ -881,8 +1025,51 @@ impl App {
             _ => {}
         }
 
-        // Pass all other keys to the terminal
+        // Handle terminal scrolling with Shift+PageUp/PageDown
+        if shift {
+            match key.code {
+                KeyCode::PageUp => {
+                    if let Some(ref mut term) = self.terminal {
+                        term.scroll_up(10);
+                    }
+                    return Ok(());
+                }
+                KeyCode::PageDown => {
+                    if let Some(ref mut term) = self.terminal {
+                        term.scroll_down(10);
+                    }
+                    return Ok(());
+                }
+                KeyCode::Home => {
+                    // Scroll to top of scrollback
+                    if let Some(ref mut term) = self.terminal {
+                        let max = term.max_scrollback();
+                        term.scroll_up(max);
+                    }
+                    return Ok(());
+                }
+                KeyCode::End => {
+                    // Scroll to bottom (current output)
+                    if let Some(ref mut term) = self.terminal {
+                        term.scroll_to_bottom();
+                    }
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
+        // When user types, scroll to bottom to show current output
         if let Some(ref mut term) = self.terminal {
+            if term.is_scrolled_back() {
+                // Any regular key input scrolls back to bottom
+                match key.code {
+                    KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace => {
+                        term.scroll_to_bottom();
+                    }
+                    _ => {}
+                }
+            }
             term.send_key(key.code, key.modifiers)?;
         }
         Ok(())
@@ -1039,7 +1226,11 @@ impl App {
                         doc.scroll_y = doc.scroll_y.saturating_sub(3);
                     }
                 }
-                _ => {}
+                Pane::Terminal => {
+                    if let Some(ref mut term) = self.terminal {
+                        term.scroll_up(3);
+                    }
+                }
             },
             MouseEventKind::ScrollDown => match self.focused_pane {
                 Pane::FileTree => {
@@ -1053,7 +1244,11 @@ impl App {
                         doc.scroll_y = (doc.scroll_y + 3).min(max_scroll);
                     }
                 }
-                _ => {}
+                Pane::Terminal => {
+                    if let Some(ref mut term) = self.terminal {
+                        term.scroll_down(3);
+                    }
+                }
             },
             _ => {}
         }

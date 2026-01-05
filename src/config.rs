@@ -30,6 +30,9 @@ pub struct EditorConfig {
     /// Word wrap
     #[serde(default)]
     pub word_wrap: bool,
+    /// Syntax highlighting theme name
+    #[serde(default = "default_syntax_theme")]
+    pub syntax_theme: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +87,9 @@ fn default_terminal_height() -> u16 {
 fn default_theme() -> String {
     "dark".to_string()
 }
+fn default_syntax_theme() -> String {
+    "base16-ocean.dark".to_string()
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -105,6 +111,7 @@ impl Default for EditorConfig {
             show_line_numbers: true,
             highlight_current_line: true,
             word_wrap: false,
+            syntax_theme: "base16-ocean.dark".to_string(),
         }
     }
 }

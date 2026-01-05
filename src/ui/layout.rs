@@ -1,7 +1,7 @@
 use crate::app::App;
 use ratatui::prelude::*;
 
-use super::{editor, file_tree, tab_bar, terminal};
+use super::{editor, file_tree, search_bar, tab_bar, terminal};
 
 /// Represents which pane is currently focused
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,46 +47,58 @@ pub fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// Draw the editor and terminal panes (stacked vertically)
 fn draw_editor_terminal(frame: &mut Frame, app: &mut App, area: Rect) {
-    if app.show_terminal {
-        // Split vertically: editor on top, terminal on bottom
-        let terminal_height =
-            (area.height as f32 * app.terminal_height_percent as f32 / 100.0) as u16;
-        let terminal_height = terminal_height.clamp(5, area.height.saturating_sub(10));
+    let search_height = search_bar::height(app);
 
-        let v_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),               // Tab bar
-                Constraint::Min(5),                  // Editor
-                Constraint::Length(terminal_height), // Terminal
-            ])
-            .split(area);
+    match (app.show_editor, app.show_terminal) {
+        // Both editor and terminal visible
+        (true, true) => {
+            let terminal_height =
+                (area.height as f32 * app.terminal_height_percent as f32 / 100.0) as u16;
+            let terminal_height = terminal_height.clamp(5, area.height.saturating_sub(10));
 
-        // Draw tab bar
-        tab_bar::draw(frame, app, v_chunks[0]);
+            let v_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),               // Tab bar
+                    Constraint::Min(5),                  // Editor
+                    Constraint::Length(search_height),   // Search bar (0 or 1)
+                    Constraint::Length(terminal_height), // Terminal
+                ])
+                .split(area);
 
-        // Draw editor
-        let editor_focused = app.focused_pane == Pane::Editor;
-        editor::draw(frame, app, v_chunks[1], editor_focused);
+            tab_bar::draw(frame, app, v_chunks[0]);
+            editor::draw(frame, app, v_chunks[1], app.focused_pane == Pane::Editor);
+            if search_height > 0 {
+                search_bar::draw(frame, app, v_chunks[2]);
+            }
+            terminal::draw(frame, app, v_chunks[3], app.focused_pane == Pane::Terminal);
+        }
+        // Only editor visible
+        (true, false) => {
+            let v_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),             // Tab bar
+                    Constraint::Min(5),                // Editor
+                    Constraint::Length(search_height), // Search bar (0 or 1)
+                ])
+                .split(area);
 
-        // Draw terminal
-        terminal::draw(frame, app, v_chunks[2], app.focused_pane == Pane::Terminal);
-    } else {
-        // No terminal, just tab bar + editor
-        let v_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1), // Tab bar
-                Constraint::Min(5),    // Editor
-            ])
-            .split(area);
-
-        // Draw tab bar
-        tab_bar::draw(frame, app, v_chunks[0]);
-
-        // Draw editor
-        let editor_focused = app.focused_pane == Pane::Editor;
-        editor::draw(frame, app, v_chunks[1], editor_focused);
+            tab_bar::draw(frame, app, v_chunks[0]);
+            editor::draw(frame, app, v_chunks[1], app.focused_pane == Pane::Editor);
+            if search_height > 0 {
+                search_bar::draw(frame, app, v_chunks[2]);
+            }
+        }
+        // Only terminal visible
+        (false, true) => {
+            terminal::draw(frame, app, area, app.focused_pane == Pane::Terminal);
+        }
+        // Neither visible - show empty area or default to terminal
+        (false, false) => {
+            // Show at least terminal if both are hidden
+            terminal::draw(frame, app, area, app.focused_pane == Pane::Terminal);
+        }
     }
 }
 

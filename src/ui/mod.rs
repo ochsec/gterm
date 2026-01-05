@@ -3,6 +3,7 @@ mod editor;
 mod file_tree;
 mod layout;
 pub mod menu_bar;
+mod search_bar;
 mod status_bar;
 mod tab_bar;
 mod terminal;

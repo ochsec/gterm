@@ -43,6 +43,7 @@ pub enum MenuAction {
 
     // View menu
     ToggleSidebar,
+    ToggleEditor,
     ToggleTerminal,
     FocusEditor,
     FocusFileTree,
@@ -227,13 +228,19 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
         &[
             MenuItem {
                 label: "Toggle Sidebar",
-                shortcut: Some("Ctrl+Shift+B"),
+                shortcut: Some("Ctrl+B"),
                 action: MenuAction::ToggleSidebar,
                 enabled: true,
             },
             MenuItem {
+                label: "Toggle Editor",
+                shortcut: Some("Ctrl+E"),
+                action: MenuAction::ToggleEditor,
+                enabled: true,
+            },
+            MenuItem {
                 label: "Toggle Terminal",
-                shortcut: Some("Ctrl+Shift+T"),
+                shortcut: Some("Ctrl+T"),
                 action: MenuAction::ToggleTerminal,
                 enabled: true,
             },
@@ -242,12 +249,6 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
                 shortcut: None,
                 action: MenuAction::Separator,
                 enabled: false,
-            },
-            MenuItem {
-                label: "Focus Editor",
-                shortcut: Some("F2"),
-                action: MenuAction::FocusEditor,
-                enabled: true,
             },
             MenuItem {
                 label: "Focus File Tree",
