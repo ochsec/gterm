@@ -276,10 +276,9 @@ fn render_highlighted_line(
             }
             s
         } else {
-            // Full syntax highlighting
+            // Normal line - use editor background, ignore syntect background
             let fg = hl_style.fg.unwrap_or(theme.fg);
-            let bg = hl_style.bg.unwrap_or(theme.editor_bg);
-            let mut s = Style::default().fg(fg).bg(bg);
+            let mut s = Style::default().fg(fg).bg(theme.editor_bg);
             if hl_style.bold {
                 s = s.add_modifier(Modifier::BOLD);
             }
