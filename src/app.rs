@@ -5,7 +5,7 @@ use crate::input::InputHandler;
 use crate::search::SearchState;
 use crate::terminal::Terminal;
 use crate::theme::Theme;
-use crate::ui::dialog::{Dialog, FileOpenDialog, FileSaveAsDialog, GoToLineDialog};
+use crate::ui::dialog::{AboutDialog, Dialog, FileOpenDialog, FileSaveAsDialog, GoToLineDialog};
 use crate::ui::{self, Pane};
 use crate::utils::clipboard::Clipboard;
 use anyhow::Result;
@@ -449,7 +449,7 @@ impl App {
                         }
 
                         MenuAction::About => {
-                            // TODO: Show about dialog
+                            self.dialog = Some(Dialog::About(AboutDialog::new()));
                         }
 
                         MenuAction::Separator => {}
@@ -913,6 +913,10 @@ impl App {
                     }
                     _ => {}
                 }
+            }
+            Dialog::About(_) => {
+                // Any key closes about dialog
+                self.dialog = None;
             }
         }
 

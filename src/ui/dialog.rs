@@ -16,6 +16,8 @@ pub enum Dialog {
     Message(MessageDialog),
     /// Go to line dialog
     GoToLine(GoToLineDialog),
+    /// About dialog
+    About(AboutDialog),
 }
 
 /// File open dialog state
@@ -74,6 +76,13 @@ pub struct GoToLineDialog {
     pub total_lines: usize,
     /// Error message if invalid input
     pub error: Option<String>,
+}
+
+/// About dialog
+#[derive(Debug, Clone)]
+pub struct AboutDialog {
+    /// Application version
+    pub version: String,
 }
 
 impl FileSaveAsDialog {
@@ -219,6 +228,15 @@ impl FileSaveAsDialog {
     /// Get the currently selected entry
     pub fn selected_entry(&self) -> Option<&DirEntry> {
         self.entries.get(self.selected)
+    }
+}
+
+impl AboutDialog {
+    /// Create a new about dialog
+    pub fn new() -> Self {
+        Self {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
     }
 }
 
@@ -764,6 +782,67 @@ pub fn draw_go_to_line_dialog(frame: &mut Frame, app: &App, dialog: &GoToLineDia
     frame.render_widget(help, chunks[2]);
 }
 
+/// Draw an about dialog
+pub fn draw_about_dialog(frame: &mut Frame, app: &App, dialog: &AboutDialog) {
+    let area = frame.area();
+
+    // Dialog size
+    let dialog_width = 50u16.min(area.width - 4);
+    let dialog_height = 12u16;
+    let dialog_x = (area.width - dialog_width) / 2;
+    let dialog_y = (area.height - dialog_height) / 2;
+
+    let dialog_area = Rect {
+        x: dialog_x,
+        y: dialog_y,
+        width: dialog_width,
+        height: dialog_height,
+    };
+
+    // Clear area behind dialog
+    frame.render_widget(Clear, dialog_area);
+
+    // Draw dialog border
+    let block = Block::default()
+        .title(" About gterm ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.border_focused))
+        .style(Style::default().bg(app.theme.sidebar_bg));
+
+    let inner = block.inner(dialog_area);
+    frame.render_widget(block, dialog_area);
+
+    // Build content
+    let content = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "gterm",
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!("Version {}", dialog.version)),
+        Line::from(""),
+        Line::from("A TUI code editor inspired by Geany"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "https://github.com/geany/gterm",
+            Style::default().fg(app.theme.tree_dir),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Press any key to close",
+            Style::default().fg(app.theme.line_number),
+        )),
+    ];
+
+    let paragraph = Paragraph::new(content)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(app.theme.fg));
+
+    frame.render_widget(paragraph, inner);
+}
+
 /// Draw the active dialog (if any)
 pub fn draw_dialog(frame: &mut Frame, app: &App) {
     if let Some(dialog) = &app.dialog {
@@ -772,6 +851,7 @@ pub fn draw_dialog(frame: &mut Frame, app: &App) {
             Dialog::FileSaveAs(d) => draw_file_save_as_dialog(frame, app, d),
             Dialog::Message(d) => draw_message_dialog(frame, app, d),
             Dialog::GoToLine(d) => draw_go_to_line_dialog(frame, app, d),
+            Dialog::About(d) => draw_about_dialog(frame, app, d),
         }
     }
 }
