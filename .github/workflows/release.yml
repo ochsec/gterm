@@ -97,3 +97,90 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref_name, '-') }}  # Skip prereleases
+    
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Calculate SHA256 checksums
+        id: checksums
+        run: |
+          cd artifacts
+          echo "sha256_aarch64_darwin=$(shasum -a 256 gterm-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
+          echo "sha256_x86_64_darwin=$(shasum -a 256 gterm-${{ github.ref_name }}-x86_64-apple-darwin.tar.gz | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
+          echo "sha256_aarch64_linux=$(shasum -a 256 gterm-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
+          echo "sha256_x86_64_linux=$(shasum -a 256 gterm-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: ochsec/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"  # Remove 'v' prefix
+          SHA256_AARCH64_DARWIN="${{ steps.checksums.outputs.sha256_aarch64_darwin }}"
+          SHA256_X86_64_DARWIN="${{ steps.checksums.outputs.sha256_x86_64_darwin }}"
+          SHA256_AARCH64_LINUX="${{ steps.checksums.outputs.sha256_aarch64_linux }}"
+          SHA256_X86_64_LINUX="${{ steps.checksums.outputs.sha256_x86_64_linux }}"
+          
+          mkdir -p homebrew-tap/Formula
+          cat > homebrew-tap/Formula/gterm.rb << FORMULA
+          class Gterm < Formula
+            desc "Flyweight IDE in your terminal - TUI code editor inspired by Geany"
+            homepage "https://github.com/ochsec/gterm"
+            version "${VERSION}"
+            license "GPL-2.0"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/ochsec/gterm/releases/download/v\#{version}/gterm-v\#{version}-aarch64-apple-darwin.tar.gz"
+                sha256 "${SHA256_AARCH64_DARWIN}"
+              end
+              on_intel do
+                url "https://github.com/ochsec/gterm/releases/download/v\#{version}/gterm-v\#{version}-x86_64-apple-darwin.tar.gz"
+                sha256 "${SHA256_X86_64_DARWIN}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/ochsec/gterm/releases/download/v\#{version}/gterm-v\#{version}-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "${SHA256_AARCH64_LINUX}"
+              end
+              on_intel do
+                url "https://github.com/ochsec/gterm/releases/download/v\#{version}/gterm-v\#{version}-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "${SHA256_X86_64_LINUX}"
+              end
+            end
+
+            def install
+              bin.install "gterm"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("\#{bin}/gterm --version 2>&1", 1)
+            end
+          end
+          FORMULA
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/gterm.rb
+          git commit -m "Update gterm to ${{ github.ref_name }}"
+          git push

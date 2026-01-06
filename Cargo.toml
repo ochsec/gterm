@@ -6,7 +6,7 @@ description = "A TUI code editor inspired by Geany"
 license = "GPL-2.0"
 authors = ["gterm contributors"]
 readme = "README.md"
-repository = "https://github.com/gterm/gterm"
+repository = "https://github.com/ochsec/gterm"
 keywords = ["tui", "editor", "terminal", "ide"]
 categories = ["command-line-utilities", "text-editors"]
 
